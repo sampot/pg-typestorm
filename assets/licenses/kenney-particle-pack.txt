@@ -1,8 +1,11 @@
 	
 
-	UI SFX Set
+	Particle Pack (1.1)
 
-	by  Kenney Vleugels (Kenney.nl)
+	by Kenney Vleugels (Kenney.nl)
+
+	Additional credit for creating filter templates:
+	Indigo Ray, Craig Nisbet, Zoltan Erdokovy, Heliagon, ThreeDee, Killst4r and Tim2501
 
 			------------------------------
 
@@ -17,5 +20,4 @@
 	Donate:   http://support.kenney.nl
 	Request:  http://request.kenney.nl
 
-	Follow on Twitter for updates:
-	@KenneyNL
+	Follow on Twitter for updates: @KenneyNL (www.twitter.com/kenneynl)

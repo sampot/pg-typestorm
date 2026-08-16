@@ -1,74 +1,614 @@
-import { createGame, applyAction, getLegalActions, summarize, getOutcome } from "./game.js";
+/**
+ * Shell for 字幕風暴: keyboard input, DOM words over a canvas storm, sound,
+ * and high-score persistence. All game rules live in game.js.
+ */
+
+import { COMBO_LIFE_STEP, MAX_LIVES, TypestormGame } from "./game.js";
 import { GameAudio } from "./audio.js";
-import { loadProgress, saveProgress } from "./persist.js";
+import { loadProgress, mergeProgress, saveProgress } from "./persist.js";
 
-const META={"id":"pg-typestorm","title":"字浪風暴","tips":["先點一個落下詞，再按「輸入擊破」。","時間前進會讓所有詞往城市下降。","漏掉三個詞，防線就會失守。"]};
-const LABELS={"room1":"客廳","room2":"暗房","room3":"鐘塔","inspect":"仔細搜查","code1947":"輸入 1947","code7491":"輸入 7491","find1":"黃銅物件","find2":"木質物件","find3":"紙上物件","find4":"紅色物件","placeA":"放置藍門","placeB":"放置橘門","fall":"墜落蓄力","launch":"穿門發射","reset":"重設雙門","next":"換下一人","dig":"分派挖掘","build":"分派搭橋","block":"分派阻擋","march":"人潮前進","up":"↑","right":"→","down":"↓","left":"←","target1":"鎖定 1","target2":"鎖定 2","target3":"鎖定 3","target4":"鎖定 4","target5":"鎖定 5","type":"輸入擊破","tick":"時間前進","lane1":"E","lane2":"A","lane3":"D","lane4":"G","wait":"空拍 +0.5s","prev":"上一詞","guess":"送出猜測","nextMatch":"下一場聯賽","suspect":"換嫌疑人","weapon":"換物證","room":"換房間","suggest":"提出建議","accuse":"正式指控","hunter":"獵人模式","hider":"匿者模式","scan":"掃描附近","answer1":"A","answer2":"B","answer3":"C","answer4":"D"};
-const $=(s)=>document.querySelector(s);
-const audio=new GameAudio();
-let state=META.id==="pg-worddawn"?createGame():createGame({seed:Date.now()%9973});
-let progress={};
-let recorded=false;
+const $ = (selector) => document.querySelector(selector);
+const el = {
+  stage: $("#stage"),
+  canvas: $("#storm"),
+  field: $("#field"),
+  overlay: $("#overlay"),
+  overlayEyebrow: $("#overlay-eyebrow"),
+  overlayTitle: $("#overlay-title"),
+  overlayBody: $("#overlay-body"),
+  overlayStats: $("#overlay-stats"),
+  overlayFoot: $("#overlay-foot"),
+  primary: $("#primary"),
+  secondary: $("#secondary"),
+  status: $("#status"),
+  focus: $("#focus"),
+  focusWord: $("#focus-word"),
+  assistRow: $("#assist-row"),
+  keyboard: $("#keyboard"),
+  assistToggle: $("#assist-toggle"),
+  wave: $("#hud-wave"),
+  lives: $("#hud-lives"),
+  score: $("#hud-score"),
+  combo: $("#hud-combo"),
+  best: $("#hud-best"),
+  comboFill: $("#combo-fill"),
+  pause: $("#pause"),
+  sound: $("#sound"),
+  help: $("#help"),
+  sheet: $("#sheet"),
+  sheetClose: $("#sheet-close"),
+  banner: $("#banner"),
+};
 
-const esc=(v)=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const meter=(v)=>Math.max(0,Math.min(100,Number(v.meter??v.progress??0)));
-const usefulEntries=(v)=>Object.entries(v).filter(([k,val])=>!["msg","outcome","log","guesses","meter","score"].includes(k)&&["string","number"].includes(typeof val)).slice(0,4);
-const HOG_ITEMS=[["黃銅鑰匙","木雕小貓","紙扇","老照片"],["茶罐","郵票","收音機","收據"],["紅傘","車票","紅鐵盒","未寄出的信"]];
-const actionLabel=(action)=>META.id==="pg-worddawn"&&action==="next"?"下一詞":META.id==="pg-atticfind"&&action.startsWith("find")?HOG_ITEMS[state.scene][Number(action.at(-1))-1]:LABELS[action]||action;
+const game = new TypestormGame({ seed: Date.now() % 100000 });
+const audio = new GameAudio();
+const ctx = el.canvas.getContext("2d");
 
-function board(view){
-  const id=META.id;
-  if(id==="pg-lockroom")return `<div class="room-map">${["客廳","暗房","鐘塔"].map((n,i)=>`<div class="room ${state.room===i?"active":""}"><b>${["🕰","📷","⚙"][i]}</b><span>${n}</span></div>`).join("")}<span class="clue">${state.seen.length?"🔎":"?"}</span></div>`;
-  if(id==="pg-atticfind"){const icons=[["🔑","🐈","🪭","📷"],["🍵","✉️","📻","🧾"],["☂️","🎫","🧰","💌"]][state.scene];return `<div class="hog-scene">${icons.map((x,i)=>`<span class="object ${state.found.includes(state.scene+":"+i)?"found":""}">${x}</span>`).join("")}</div>`}
-  if(id==="pg-gatepair")return `<div class="lab" style="--speed:${state.momentum}"><i class="portal a"></i><i class="portal b"></i><i class="orb"></i><span class="lab-label">動量 ×${state.momentum} · ${esc(view.level)}</span></div>`;
-  if(id==="pg-festcrowd")return `<div class="route"><span class="temple">⛩️</span><i class="hazard"></i><div class="crowd">${state.crowd.map((p,i)=>`<span class="walker ${state.selected===i?"selected":""}" style="--x:${Math.max(0,p.x)}">${p.safe?"✨":p.job==="build"?"👷":p.job==="dig"?"⛏️":p.job==="block"?"🚧":"🚶"}</span>`).join("")}</div></div>`;
-  if(id==="pg-lighttrace"||id==="pg-huntshade"){const size=state.size||8,cells=[];for(let y=0;y<size;y++)for(let x=0;x<size;x++){let cl="cell",text="";if(id==="pg-lighttrace"){if(state.trail.includes(x+","+y))cl+=" trail";if(state.p.x===x&&state.p.y===y)cl+=" player";if(state.ai.x===x&&state.ai.y===y)cl+=" ai"}else{if(state.hunter.x===x&&state.hunter.y===y){cl+=" ai";text="◉"}for(const h of state.hiders)if(!h.caught&&h.x===x&&h.y===y&&(state.role==="hider"||Math.abs(state.hunter.x-x)+Math.abs(state.hunter.y-y)<=3)){cl+=" player";text="◐"}}cells.push(`<i class="${cl}">${text}</i>`)}return `<div class="grid" style="--size:${size}">${cells.join("")}</div>`}
-  if(id==="pg-typestorm")return `<div class="storm"><div class="city"></div>${state.words.map((w,i)=>`<span class="word-drop ${state.target===i?"target":""}" style="--i:${i};--y:${w.y}">${esc(w.w)}</span>`).join("")}</div>`;
-  if(id==="pg-stringbeat"){const next=state.index;return `<div class="lanes">${["E","A","D","G"].map((n,l)=>`<div class="lane" data-name="${n}">${Array.from({length:7},(_,j)=>{const note=state.index+j;const chartLane=(note*3+(note%7===0?1:0))%4;return chartLane===l?`<i class="note" style="--top:${Math.min(88,j*14)}%"></i>`:""}).join("")}</div>`).join("")}<i class="hitline"></i></div>`}
-  if(id==="pg-worddawn"){const rows=state.guesses.map(g=>{const [w,...marks]=g.split(" ");const m=marks.join("");return `<div class="guess-row">${[...w].map((x,i)=>`<i class="tile ${m.includes("🟩")&&[...m].filter(z=>z==="🟩"||z==="🟨"||z==="⬛")[i]==="🟩"?"green":[...m].filter(z=>z==="🟩"||z==="🟨"||z==="⬛")[i]==="🟨"?"yellow":"black"}">${x}</i>`).join("")}</div>`}).join("");return `<div class="word-board">${rows}${Array.from({length:6-state.guesses.length},()=>'<div class="guess-row">'+Array.from({length:5},()=>'<i class="tile"></i>').join("")+'</div>').join("")}<div class="candidate">${esc(view.guess)}</div><div class="keyboard">${"QWERTYUIOPASDFGHJKLZXCVBNM".split("").map(x=>`<span class="key">${x}</span>`).join("")}</div></div>`}
-  if(id==="pg-whodunit")return `<div class="caseboard"><div class="evidence"><span>嫌疑人 <b class="pin">●</b></span><strong>${esc(view.suspect)}</strong></div><div class="evidence"><span>物證</span><strong>${esc(view.weapon)}</strong></div><div class="evidence"><span>地點</span><strong>${esc(view.room)}</strong></div><div class="evidence"><span>我的手牌</span><strong>${state.hand.map(esc).join(" · ")}</strong></div></div>`;
-  if(id==="pg-quizleague"){const q=state.questions[Math.min(state.index,9)];return `<div class="quiz-stage"><div class="scoreboard"><div><span>YOU</span><strong>${state.score}</strong></div><div><span>AI</span><strong>${state.aiScore}</strong></div><div><span>ELO</span><strong>${state.rating}</strong></div></div><div class="question-card">${esc(q?.text||view.msg)}</div></div>`}
-  return `<div class="quiz-stage"><div class="question-card">${esc(view.msg)}</div></div>`;
-}
+let progress = null;
+let overlayKind = "idle";
+let stageWidth = 0;
+let stageHeight = 0;
 
-function detail(view){
-  if(META.id==="pg-quizleague"&&state.outcome==="playing"&&!state.betweenMatches){const q=state.questions[state.index];return q.choices.map((x,i)=>`${"ABCD"[i]} · ${esc(x)}`).join("<br>")}
-  const rows=[];
-  if(view.log)rows.push(...view.log);
-  if(view.guesses)rows.push(...view.guesses);
-  if(state.seen)rows.push(...state.seen.map(x=>"線索 · "+x.text));
-  if(state.inventory?.length)rows.push("物品欄 · "+state.inventory.join("、"));
-  return rows.length?rows.slice(-6).map(x=>`<div>• ${esc(x)}</div>`).join(""):"";
-}
+// ── canvas storm ───────────────────────────────────────────────────
 
-function render(){
-  const view=summarize(state),outcome=getOutcome(state);
-  $("#message").textContent=view.msg||"";
-  $("#progress").style.width=meter(view)+"%";
-  $("#board").innerHTML=board(view);
-  $("#details").innerHTML=detail(view);
-  const stats=usefulEntries(view);
-  if(!stats.some(([k])=>k==="score"))stats.push(["score",view.score||0]);
-  $("#hud").innerHTML=stats.slice(0,4).map(([k,v])=>`<div><span>${esc(k)}</span><strong>${esc(typeof v==="object"?JSON.stringify(v):v)}</strong></div>`).join("");
-  const actions=$("#actions");actions.innerHTML="";
-  for(const action of getLegalActions(state)){
-    const b=document.createElement("button");b.type="button";b.textContent=actionLabel(action);
-    if(action==="accuse")b.className="danger";
-    b.addEventListener("click",()=>move(action));actions.append(b);
+const sprite = (src) => {
+  const image = new Image();
+  image.src = src;
+  return image;
+};
+const sparkSprite = sprite("./assets/images/spark.png");
+const glowSprite = sprite("./assets/images/glow.png");
+
+const rain = Array.from({ length: 90 }, () => ({
+  x: Math.random(),
+  y: Math.random(),
+  length: 0.03 + Math.random() * 0.07,
+  speed: 0.35 + Math.random() * 0.65,
+}));
+
+/** Fixed skyline so the defended city stays recognisable between runs. */
+const skyline = (() => {
+  const towers = [];
+  let x = -0.02;
+  let seed = 7;
+  const next = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  while (x < 1.02) {
+    const width = 0.05 + next() * 0.08;
+    towers.push({ x, width, height: 0.06 + next() * 0.13, lit: next() });
+    x += width + 0.004;
   }
-  if(outcome!=="playing"){
-    const b=document.createElement("button");b.type="button";b.className="primary";b.textContent=outcome==="won"?"勝利 · 再玩一次":"重新挑戰";b.addEventListener("click",restart);actions.append(b);
-    if(!recorded){recorded=true;void record(view,outcome)}
+  return towers;
+})();
+
+const particles = [];
+
+function resizeCanvas() {
+  const rect = el.stage.getBoundingClientRect();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  stageWidth = rect.width;
+  stageHeight = rect.height;
+  el.canvas.width = Math.max(1, Math.round(rect.width * dpr));
+  el.canvas.height = Math.max(1, Math.round(rect.height * dpr));
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function burst(word, color = "#6fe3ff") {
+  const x = (word.x / 100) * stageWidth;
+  const y = (word.y / 100) * stageHeight;
+  for (let i = 0; i < 18; i += 1) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 40 + Math.random() * 190;
+    particles.push({
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 40,
+      life: 0.5 + Math.random() * 0.4,
+      age: 0,
+      size: 10 + Math.random() * 22,
+      color,
+    });
   }
 }
 
-function move(action){audio.play(["launch","type","lane1","lane2","lane3","lane4"].includes(action)?"hit":"click");state=applyAction(state,action);render()}
-function restart(){state=createGame({seed:Date.now()%9973});recorded=false;audio.play("ok");render()}
-async function record(view,outcome){progress={...progress,bestScore:Math.max(progress.bestScore||0,view.score||0),wins:(progress.wins||0)+(outcome==="won"?1:0),rating:state.rating||progress.rating,lastPlayed:new Date().toISOString()};$("#best").textContent=String(progress.bestScore);await saveProgress(progress)}
+function drawStorm(dt) {
+  ctx.clearRect(0, 0, stageWidth, stageHeight);
+  const intensity = 0.6 + game.waveIndex * 0.16;
 
-$("#start").addEventListener("click",async()=>{await audio.start();audio.play("ok");$("#lobby").hidden=true;$("#game").hidden=false;render()});
-$("#sound").addEventListener("click",async()=>{const on=$("#sound").getAttribute("aria-pressed")!=="true";$("#sound").setAttribute("aria-pressed",String(on));$("#sound").textContent=on?"音樂：開":"音樂：關";audio.setEnabled(on);if(on)await audio.start()});
-$("#help").addEventListener("click",()=>{$("#sheet-title").textContent="怎麼玩";$("#sheet-body").innerHTML="<ol>"+META.tips.map(x=>"<li>"+esc(x)+"</li>").join("")+"</ol>";$("#sheet").hidden=false;$("#sheet-close").focus()});
-$("#sheet-close").addEventListener("click",()=>{$("#sheet").hidden=true;$("#help").focus()});
-document.addEventListener("keydown",e=>{if($("#game").hidden||getOutcome(state)!=="playing")return;const map={ArrowUp:"up",ArrowRight:"right",ArrowDown:"down",ArrowLeft:"left",w:"up",d:"right",s:"down",a:"left","1":"answer1","2":"answer2","3":"answer3","4":"answer4"};if(map[e.key]&&getLegalActions(state).includes(map[e.key])){e.preventDefault();move(map[e.key])}});
-progress=await loadProgress();if(META.id==="pg-quizleague"&&progress.rating)state.rating=progress.rating;$("#best").textContent=String(progress.bestScore||0);
+  ctx.save();
+  ctx.strokeStyle = "rgba(150, 200, 255, 0.2)";
+  ctx.lineWidth = 1;
+  for (const drop of rain) {
+    drop.y += drop.speed * intensity * dt;
+    drop.x += 0.03 * dt;
+    if (drop.y > 1.1) {
+      drop.y = -0.1;
+      drop.x = Math.random();
+    }
+    const x = drop.x * stageWidth;
+    const y = drop.y * stageHeight;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + 4, y + drop.length * stageHeight);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Warning line: words below it are about to hit the city.
+  const alarm = game.lives <= 1 ? 0.5 : 0.24;
+  ctx.save();
+  ctx.strokeStyle = `rgba(255, 107, 129, ${alarm})`;
+  ctx.setLineDash([6, 8]);
+  ctx.beginPath();
+  ctx.moveTo(0, stageHeight * 0.84);
+  ctx.lineTo(stageWidth, stageHeight * 0.84);
+  ctx.stroke();
+  ctx.restore();
+
+  // City silhouette; window lights go out as the city takes damage.
+  const healthy = game.lives / MAX_LIVES;
+  for (const tower of skyline) {
+    const w = tower.width * stageWidth;
+    const h = tower.height * stageHeight;
+    const x = tower.x * stageWidth;
+    const y = stageHeight - h;
+    ctx.fillStyle = "#050d1c";
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = "rgba(111, 227, 255, 0.28)";
+    ctx.fillRect(x, y, w, 1.5);
+    const alive = tower.lit < healthy;
+    ctx.fillStyle = alive ? "rgba(255, 209, 102, 0.8)" : "rgba(255, 107, 129, 0.4)";
+    let row = 0;
+    for (let wy = y + 7; wy < stageHeight - 5; wy += 11) {
+      let column = 0;
+      for (let wx = x + 5; wx < x + w - 6; wx += 10) {
+        if ((row + column) % 3 !== 2) ctx.fillRect(wx, wy, 3.5, 5);
+        column += 1;
+      }
+      row += 1;
+    }
+  }
+  ctx.fillStyle = "rgba(111, 227, 255, 0.4)";
+  ctx.fillRect(0, stageHeight - 2, stageWidth, 2);
+
+  // Glow behind the locked word so the eye finds it instantly.
+  const target = game.target;
+  if (target && glowSprite.complete) {
+    const size = Math.max(stageWidth, stageHeight) * 0.34;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.4;
+    ctx.drawImage(
+      glowSprite,
+      (target.x / 100) * stageWidth - size / 2,
+      (target.y / 100) * stageHeight - size / 2,
+      size,
+      size,
+    );
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = particles.length - 1; i >= 0; i -= 1) {
+    const p = particles[i];
+    p.age += dt;
+    if (p.age >= p.life) {
+      particles.splice(i, 1);
+      continue;
+    }
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 260 * dt;
+    const fade = 1 - p.age / p.life;
+    ctx.globalAlpha = fade;
+    if (sparkSprite.complete) {
+      ctx.drawImage(sparkSprite, p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+    }
+  }
+  ctx.restore();
+}
+
+// ── falling words (DOM) ────────────────────────────────────────────
+
+const wordNodes = new Map();
+
+function wordNode(word) {
+  const node = document.createElement("span");
+  node.className = "word";
+  node.dataset.kind = word.kind;
+  node.innerHTML = '<b class="done"></b><i class="next"></i><em class="rest"></em>';
+  el.field.append(node);
+  wordNodes.set(word.id, node);
+  return node;
+}
+
+function syncWords() {
+  const seen = new Set();
+  for (const word of game.words) {
+    seen.add(word.id);
+    const node = wordNodes.get(word.id) ?? wordNode(word);
+    node.style.left = `${word.x}%`;
+    node.style.top = `${word.y}%`;
+    if (node.dataset.typed !== String(word.typed)) {
+      node.dataset.typed = String(word.typed);
+      node.children[0].textContent = word.text.slice(0, word.typed);
+      node.children[1].textContent = word.text[word.typed] ?? "";
+      node.children[2].textContent = word.text.slice(word.typed + 1);
+    }
+    node.classList.toggle("locked", word.id === game.targetId);
+    node.classList.toggle("danger", word.y > 80);
+  }
+  for (const [id, node] of wordNodes) {
+    if (!seen.has(id)) {
+      node.remove();
+      wordNodes.delete(id);
+    }
+  }
+}
+
+function clearWords() {
+  for (const node of wordNodes.values()) node.remove();
+  wordNodes.clear();
+  particles.length = 0;
+}
+
+// ── hud, focus strip, assist row ───────────────────────────────────
+
+const shown = {};
+
+function setText(node, key, value) {
+  if (shown[key] === value) return;
+  shown[key] = value;
+  node.textContent = value;
+}
+
+function syncHud() {
+  const view = game.summary();
+  setText(el.wave, "wave", `${view.wave}/${view.waveCount}`);
+  setText(el.score, "score", String(view.score));
+  setText(el.combo, "combo", view.combo ? `${view.combo} ×${view.multiplier}` : "0");
+  setText(el.best, "best", String(Math.max(progress?.best ?? 0, view.score)));
+  if (shown.lives !== `${view.lives}`) {
+    shown.lives = `${view.lives}`;
+    el.lives.innerHTML = `${"♥".repeat(view.lives)}<span class="spent">${"♥".repeat(
+      Math.max(0, MAX_LIVES - view.lives),
+    )}</span>`;
+  }
+  el.comboFill.style.width = `${((view.combo % COMBO_LIFE_STEP) / COMBO_LIFE_STEP) * 100}%`;
+  setText(el.status, "status", view.message);
+
+  const target = game.target;
+  const signature = target ? `${target.text}:${target.typed}` : "";
+  if (shown.focus !== signature) {
+    shown.focus = signature;
+    el.focusWord.innerHTML = target
+      ? `<span class="done">${target.text.slice(0, target.typed)}</span>` +
+        `<span class="next">${target.text[target.typed] ?? ""}</span>` +
+        `<span class="rest">${target.text.slice(target.typed + 1)}</span>`
+      : '<span class="focus-empty">尚未鎖定 · 打字首鎖定</span>';
+  }
+  syncAssist();
+}
+
+function assistLetters() {
+  const target = game.target;
+  if (target) return [target.text[target.typed]];
+  return [
+    ...new Set(
+      [...game.words]
+        .sort((a, b) => b.y - a.y)
+        .slice(0, 7)
+        .map((word) => word.text[0]),
+    ),
+  ];
+}
+
+function syncAssist() {
+  const letters = assistLetters();
+  const signature = `${game.status}:${game.target ? "lock" : "open"}:${letters.join("")}`;
+  if (shown.assist === signature) return;
+  shown.assist = signature;
+  el.assistRow.innerHTML = "";
+  if (!letters.length) {
+    const hint = document.createElement("span");
+    hint.className = "assist-empty";
+    hint.textContent = game.status === "playing" ? "風暴集結中…" : "按開始防守";
+    el.assistRow.append(hint);
+    return;
+  }
+  for (const letter of letters) {
+    el.assistRow.append(assistButton(letter, game.target != null));
+  }
+}
+
+function assistButton(letter, hot) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = hot ? "assist-key hot" : "assist-key";
+  button.textContent = letter;
+  button.dataset.letter = letter;
+  return button;
+}
+
+function buildKeyboard() {
+  for (const row of ["qwertyuiop", "asdfghjkl", "zxcvbnm"]) {
+    for (const letter of row) el.keyboard.append(assistButton(letter, false));
+  }
+}
+
+// ── overlay ────────────────────────────────────────────────────────
+
+const OVERLAY = {
+  idle: {
+    eyebrow: "READY",
+    title: "守住城市",
+    body: "英文短詞會從天上落下。用鍵盤打出某個詞的<strong>第一個字母</strong>就會鎖定它，接著把它打完就能擊破。六波全清就贏。",
+    primary: "開始防守",
+    secondary: null,
+    foot: "按 Enter 開始 · Esc 暫停",
+  },
+  paused: {
+    eyebrow: "PAUSED",
+    title: "風暴暫停",
+    body: "回到鍵盤就繼續。",
+    primary: "繼續",
+    secondary: "重新開始",
+    foot: "按 Esc 或 Enter 繼續",
+  },
+  won: {
+    eyebrow: "CITY SAVED",
+    title: "風暴散去了",
+    body: "六波全清，城市守住。",
+    primary: "再來一次",
+    secondary: null,
+    foot: "按 Enter 再玩一場",
+  },
+  lost: {
+    eyebrow: "BREACHED",
+    title: "防線失守",
+    body: "字幕壓進城市了。再守一次？",
+    primary: "再來一次",
+    secondary: null,
+    foot: "按 Enter 再玩一場",
+  },
+};
+
+function showOverlay(kind) {
+  overlayKind = kind;
+  const config = OVERLAY[kind];
+  el.overlayEyebrow.textContent = config.eyebrow;
+  el.overlayTitle.textContent = config.title;
+  el.overlayBody.innerHTML = config.body;
+  el.overlayFoot.textContent = config.foot;
+  el.primary.textContent = config.primary;
+  el.secondary.hidden = !config.secondary;
+  if (config.secondary) el.secondary.textContent = config.secondary;
+
+  const showStats = kind === "won" || kind === "lost";
+  el.overlayStats.hidden = !showStats;
+  if (showStats) {
+    const view = game.summary();
+    el.overlayStats.innerHTML = [
+      ["分數", view.score],
+      ["最佳", Math.max(progress?.best ?? 0, view.score)],
+      ["最高連擊", view.bestCombo],
+      ["擊破", view.cleared],
+      ["準確率", `${view.accuracy}%`],
+      ["抵達波次", `${view.wave}/${view.waveCount}`],
+    ]
+      .map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`)
+      .join("");
+  }
+  el.overlay.hidden = false;
+  el.primary.focus({ preventScroll: true });
+}
+
+function hideOverlay() {
+  el.overlay.hidden = true;
+}
+
+// ── run control ────────────────────────────────────────────────────
+
+function startRun() {
+  game.start();
+  clearWords();
+  Object.keys(shown).forEach((key) => delete shown[key]);
+  hideOverlay();
+  el.pause.hidden = false;
+  void audio.startMusic();
+  showBanner("第 1 波");
+  syncHud();
+}
+
+function togglePause() {
+  if (game.status === "playing") {
+    game.pause();
+    showOverlay("paused");
+  } else if (game.status === "paused") {
+    game.resume();
+    hideOverlay();
+  }
+}
+
+async function finishRun() {
+  el.pause.hidden = true;
+  const view = game.summary();
+  audio.play(view.status === "won" ? "win" : "lose");
+  if (view.status === "lost") audio.stopMusic();
+  progress = mergeProgress(progress, {
+    score: view.score,
+    bestCombo: view.bestCombo,
+    wave: view.wave,
+    outcome: view.status,
+  });
+  showOverlay(view.status);
+  syncHud();
+  await saveProgress(progress);
+}
+
+let bannerTimer = 0;
+
+function showBanner(text) {
+  el.banner.textContent = text;
+  el.banner.hidden = false;
+  el.banner.style.animation = "none";
+  void el.banner.offsetWidth;
+  el.banner.style.animation = "";
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => {
+    el.banner.hidden = true;
+  }, 1200);
+}
+
+function hurt() {
+  el.stage.classList.remove("hurt", "shake");
+  void el.stage.offsetWidth;
+  el.stage.classList.add("hurt", "shake");
+}
+
+function flashWrong() {
+  el.focus.classList.remove("wrong");
+  void el.focus.offsetWidth;
+  el.focus.classList.add("wrong");
+}
+
+function handleEvents(events) {
+  for (const event of events) {
+    if (event.type === "bonus") audio.play("bonus");
+    else if (event.type === "breach") {
+      burst(event.word, "#ff6b81");
+      audio.play("breach");
+      hurt();
+    } else if (event.type === "miss" && event.lifeLost) hurt();
+    else if (event.type === "wave") {
+      audio.play("wave");
+      showBanner(`第 ${event.wave} 波`);
+    }
+    else if (event.type === "won" || event.type === "lost") void finishRun();
+  }
+}
+
+function typeLetter(letter) {
+  const outcome = game.key(letter);
+  if (outcome.result === "ignored") return;
+  if (outcome.result === "miss") {
+    audio.play("error", { rate: 0.95 });
+    flashWrong();
+  } else if (outcome.result === "lock") {
+    audio.play("lock");
+  } else if (outcome.result === "hit") {
+    audio.play("key", { rate: 1 + Math.min(0.5, game.combo * 0.015) });
+  } else if (outcome.result === "clear") {
+    audio.play("burst");
+    burst(outcome.word, "#6fe3ff");
+  }
+  handleEvents(outcome.events);
+}
+
+// ── input ──────────────────────────────────────────────────────────
+
+el.primary.addEventListener("click", () => {
+  if (overlayKind === "paused") togglePause();
+  else startRun();
+});
+el.secondary.addEventListener("click", startRun);
+el.pause.addEventListener("click", togglePause);
+
+el.sound.addEventListener("click", async () => {
+  const on = audio.setEnabled(el.sound.getAttribute("aria-pressed") !== "true");
+  el.sound.setAttribute("aria-pressed", String(on));
+  el.sound.textContent = on ? "音效 開" : "音效 關";
+  if (on && game.status === "playing") await audio.startMusic();
+  if (progress) await saveProgress({ ...progress, sound: on });
+});
+
+el.help.addEventListener("click", () => {
+  if (game.status === "playing") togglePause();
+  el.sheet.hidden = false;
+  el.sheetClose.focus({ preventScroll: true });
+});
+el.sheetClose.addEventListener("click", () => {
+  el.sheet.hidden = true;
+  el.help.focus({ preventScroll: true });
+});
+
+el.assistToggle.addEventListener("click", () => {
+  const open = el.keyboard.hidden;
+  el.keyboard.hidden = !open;
+  el.assistToggle.setAttribute("aria-pressed", String(open));
+});
+
+for (const host of [el.assistRow, el.keyboard]) {
+  host.addEventListener("click", (event) => {
+    const letter = event.target.closest("[data-letter]")?.dataset.letter;
+    if (letter) typeLetter(letter);
+  });
+}
+
+window.addEventListener("keydown", (event) => {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (!el.sheet.hidden) {
+    if (event.key === "Escape" || event.key === "Enter") {
+      event.preventDefault();
+      el.sheetClose.click();
+    }
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    togglePause();
+    return;
+  }
+  if (event.key === "Enter" || event.key === " ") {
+    if (!el.overlay.hidden) {
+      event.preventDefault();
+      el.primary.click();
+    }
+    return;
+  }
+  if (/^[a-zA-Z]$/.test(event.key)) {
+    event.preventDefault();
+    typeLetter(event.key);
+  }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && game.status === "playing") togglePause();
+});
+
+// ── loop ───────────────────────────────────────────────────────────
+
+let previous = performance.now();
+
+function frame(now) {
+  const dt = Math.min(0.05, Math.max(0, (now - previous) / 1000));
+  previous = now;
+  if (game.status === "playing") handleEvents(game.tick(dt));
+  drawStorm(dt);
+  syncWords();
+  syncHud();
+  requestAnimationFrame(frame);
+}
+
+new ResizeObserver(resizeCanvas).observe(el.stage);
+resizeCanvas();
+buildKeyboard();
+showOverlay("idle");
+syncHud();
+requestAnimationFrame(frame);
+
+progress = await loadProgress();
+if (progress.sound === false) {
+  audio.setEnabled(false);
+  el.sound.setAttribute("aria-pressed", "false");
+  el.sound.textContent = "音效 關";
+}
+delete shown.best;
+syncHud();

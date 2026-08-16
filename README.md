@@ -1,19 +1,50 @@
 # 字幕風暴 (`pg-typestorm`)
 
-打字殺敵／搶修台詞。
+英文短詞從天而降，用**實體鍵盤**打字把它們打掉：打出某個詞的第一個字母就鎖定它，把整個詞打完就擊破。詞落到城市上會扣命，六波風暴全清就贏。
 
-類型：**打字** · 系列建議：街機
+類型：**打字** · 系列：街機 · 純 HTML／CSS／JavaScript（無 build 階段）
 
-## 遊玩
+## 玩法
 
-純 HTML／CSS／JavaScript（無 build）。本機開 `index.html` 或經 Playgrounds／go 安裝。
+- **鎖定：** 打某個詞的第一個字母即鎖定；同字首時鎖定最靠近城市的那一個。
+- **推進：** 鎖定後只吃正確的下一個字母；打完整個詞就擊破。
+- **失分：** 打錯會中斷連擊；連續累積 5 次錯字城牆受損一次（扣一命）。
+- **扣命：** 詞掉到城市上扣一命；生命歸零就結束。
+- **回血：** 連擊每 12 下修復一命（上限 5）。
+- **加分：** 連擊每 10 下讓倍率 +1（上限 ×5）；長詞（heavy，金框）擊破分數 ×2。
+- **波次：** 六波，落速、同時在場數與詞長逐波上升；清完最後一波獲勝。
+- **鍵盤：** 字母鍵打字、`Esc` 暫停、`Enter`／空白鍵開始或再來一次。
+- **手機：** 下方「螢幕字母」列顯示現在需要的字母（鎖定時只有一顆），可切「全鍵盤」；主力操作仍是實體鍵盤。
+
+## 檔案
+
+| 檔案 | 說明 |
+| --- | --- |
+| `game.js` | 純規則：鎖定、推進、扣命、波次、計分（無 DOM／無音效） |
+| `app.js` | 場面：Canvas 風暴／天際線／粒子＋DOM 落詞、鍵盤輸入、HUD、音效 |
+| `audio.js` | 取樣播放（每個音效小池、依連擊調 pitch） |
+| `persist.js` | 高分紀錄，走 `/api/kv/pg-typestorm:progress` |
+| `functions.js` | SAM 後端：把 `/api/kv/{key}` 接到沙盒 `env.KV` |
+
+## 持久化
+
+高分／最高連擊／場次只透過宿主 API 存取（不把裸 `localStorage` 當權威）：
+
+```js
+await fetch("/api/kv/pg-typestorm:progress");                      // 讀
+await fetch("/api/kv/pg-typestorm:progress", { method: "PUT", body }); // 寫
+```
+
+離線或直接用 `file://` 開啟時讀寫都會靜默失敗，遊戲照常可玩。
 
 ## 開發
 
 ```bash
-npx vitest run
+npx vitest run   # 43 個測試：鎖定、打對／打錯、清詞計分、波次、勝敗、KV 持久化
 ```
+
+不安裝任何套件、不放 `node_modules`；工具一律 `npx` 臨時執行。
 
 ## 署名
 
-見 [ATTRIBUTION.md](./ATTRIBUTION.md)。
+見 [ATTRIBUTION.md](./ATTRIBUTION.md)（音效／音樂／字型／粒子皆 CC0 或 OFL，仍全部署名）。

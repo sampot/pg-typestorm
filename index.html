@@ -1,41 +1,98 @@
 <!doctype html>
-<html lang="zh-Hant" data-game="pg-typestorm">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="theme-color" content="#081625" />
-  <meta name="description" content="鎖定落下的字幕並完整輸入，守住城市，闖過中文、英文與暴風三階段。" />
-  <title>字浪風暴</title>
-  <link rel="stylesheet" href="./styles.css" />
-</head>
-<body>
-  <div class="ambience" aria-hidden="true"><i></i><i></i><i></i></div>
-  <main>
-    <header class="topbar">
-      <div><p class="eyebrow">TYPE TO DEFEND</p><h1>字浪風暴</h1></div>
-      <button id="sound" class="quiet" type="button" aria-pressed="false">音樂：關</button>
-    </header>
-    <section id="lobby" class="lobby panel">
-      <div class="seal" aria-hidden="true">⌨</div>
-      <p>鎖定落下的字幕並完整輸入，守住城市，闖過中文、英文與暴風三階段。</p>
-      <div class="record"><span>場域最佳</span><strong id="best">0</strong></div>
-      <button id="start" class="primary" type="button">開始遊戲</button>
-    </section>
-    <section id="game" hidden>
-      <div id="hud" class="hud" aria-label="遊戲狀態"></div>
-      <section class="stage panel">
-        <div id="board" class="board" aria-label="遊戲場景"></div>
-        <div class="progress" aria-hidden="true"><i id="progress"></i></div>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#050b18" />
+    <meta
+      name="description"
+      content="字幕風暴：英文短詞從天而降，用實體鍵盤打第一個字母鎖定、打完擊破，守住城市六波風暴。"
+    />
+    <title>字幕風暴</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <p class="eyebrow">TYPE TO DEFEND</p>
+          <h1>字幕風暴</h1>
+        </div>
+        <div class="topbar-actions">
+          <button id="pause" class="chip" type="button" hidden>暫停</button>
+          <button id="sound" class="chip" type="button" aria-pressed="true">音效 開</button>
+          <button id="help" class="chip" type="button">玩法</button>
+        </div>
+      </header>
+
+      <div class="hud">
+        <div class="hud-cell"><span>波次</span><strong id="hud-wave">1/6</strong></div>
+        <div class="hud-cell"><span>生命</span><strong id="hud-lives" class="hearts">♥♥♥</strong></div>
+        <div class="hud-cell"><span>分數</span><strong id="hud-score">0</strong></div>
+        <div class="hud-cell"><span>連擊</span><strong id="hud-combo">0</strong></div>
+        <div class="hud-cell"><span>最佳</span><strong id="hud-best">0</strong></div>
+      </div>
+      <div class="combo-bar" aria-hidden="true"><i id="combo-fill"></i></div>
+
+      <section class="stage" id="stage">
+        <canvas id="storm" aria-hidden="true"></canvas>
+        <div class="field" id="field" aria-hidden="true"></div>
+        <p class="banner" id="banner" aria-hidden="true" hidden></p>
+        <div class="overlay" id="overlay">
+          <div class="overlay-card" id="overlay-card">
+            <p class="eyebrow" id="overlay-eyebrow">READY</p>
+            <h2 id="overlay-title">守住城市</h2>
+            <p id="overlay-body">
+              英文短詞會從天上落下。用鍵盤打出某個詞的<strong>第一個字母</strong>就會鎖定它，接著把它打完就能擊破。
+            </p>
+            <dl class="overlay-stats" id="overlay-stats" hidden></dl>
+            <div class="overlay-actions">
+              <button id="primary" class="primary" type="button">開始防守</button>
+              <button id="secondary" class="ghost" type="button" hidden>重新開始</button>
+            </div>
+            <p class="overlay-foot" id="overlay-foot">按 Enter 開始 · Esc 暫停</p>
+          </div>
+        </div>
       </section>
-      <p id="message" class="message" role="status" aria-live="polite"></p>
-      <section id="details" class="details panel"></section>
-      <div id="actions" class="actions"></div>
+
+      <p id="status" class="status" role="status" aria-live="polite">打詞的第一個字母就會鎖定那個詞。</p>
+
+      <section class="focus" id="focus">
+        <p class="focus-label">目前鎖定</p>
+        <p class="focus-word" id="focus-word"><span class="focus-empty">尚未鎖定</span></p>
+      </section>
+
+      <section class="assist" aria-label="螢幕輔助字母">
+        <div class="assist-head">
+          <p>螢幕字母（輔助）</p>
+          <button id="assist-toggle" class="chip" type="button" aria-pressed="false">全鍵盤</button>
+        </div>
+        <div class="assist-row" id="assist-row"></div>
+        <div class="keyboard" id="keyboard" hidden></div>
+      </section>
+
+      <footer class="foot">
+        <span>MIT · 2026 Sampot</span>
+        <a href="./ATTRIBUTION.md">素材署名</a>
+      </footer>
+    </main>
+
+    <section id="sheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <div class="sheet-card">
+        <p class="eyebrow">HOW TO PLAY</p>
+        <h2 id="sheet-title">玩法</h2>
+        <ol>
+          <li>詞從天上落下，打出它的<strong>第一個字母</strong>即鎖定；同字首時鎖定最靠近城市的那個。</li>
+          <li>鎖定後只吃正確的下一個字母；打完整個詞就擊破得分。</li>
+          <li>打錯會中斷連擊，連續累積 5 次錯字城牆就會受損。</li>
+          <li>詞掉到城市上扣一命；連擊每 12 下修復一命（上限 5）。</li>
+          <li>清完一波進下一波，六波全清就贏；生命歸零就守不住了。</li>
+          <li>手機可用下方「螢幕字母」列或全鍵盤代替實體鍵盤。</li>
+        </ol>
+        <button id="sheet-close" class="primary" type="button">知道了</button>
+      </div>
     </section>
-    <footer><button id="help" class="text-button" type="button">玩法</button><a href="./ATTRIBUTION.md">素材署名</a></footer>
-  </main>
-  <section id="sheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheet-title">
-    <div class="sheet-card"><p class="eyebrow">TYPE TO DEFEND</p><h2 id="sheet-title">玩法</h2><div id="sheet-body"></div><button id="sheet-close" class="primary" type="button">知道了</button></div>
-  </section>
-  <script type="module" src="./app.js"></script>
-</body>
+
+    <script type="module" src="./app.js"></script>
+  </body>
 </html>
