@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "rev": "cf663a8",
+  "files": [
+    "app.js",
+    "assets/audio/bonus.ogg",
+    "assets/audio/breach.ogg",
+    "assets/audio/burst.ogg",
+    "assets/audio/error.ogg",
+    "assets/audio/key.ogg",
+    "assets/audio/lock.ogg",
+    "assets/audio/lose.ogg",
+    "assets/audio/music.ogg",
+    "assets/audio/wave.ogg",
+    "assets/audio/win.ogg",
+    "assets/fonts/Cubic_11.woff2",
+    "assets/images/glow.png",
+    "assets/images/spark.png",
+    "assets/licenses/blippy-bits.txt",
+    "assets/licenses/cubic-11-OFL.txt",
+    "assets/licenses/cubic-11-SOURCE.txt",
+    "assets/licenses/kenney-particle-pack.txt",
+    "assets/licenses/oga-512-8bit-sfx-LICENSE.txt",
+    "audio.js",
+    "functions.js",
+    "game.js",
+    "index.html",
+    "persist.js",
+    "styles.css"
+  ]
+}
